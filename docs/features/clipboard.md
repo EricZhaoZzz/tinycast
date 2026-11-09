@@ -19,6 +19,10 @@
   plain-text default pastes it as it is, and ⌃⌘↵ on it falls back to ⌘↵ as on every other screen.
 - **Clipboard writes stamp a private `internalType` marker** so the poller skips Tinycast's own writes.
   If the writer and the poller ever disagree, the app re-captures its own pastes in a loop.
+- **A batch selection is ids in `PaletteState.clipboardSelection`, and the screen reads it through
+  `ClipboardScreen.marked`**, which keeps only the rows still listed. A deleted, retention-pruned or
+  filtered-out row therefore leaves no mark, and a selection of fewer than two is the single path.
+  Nothing prunes it from a view body. See [Multi-select](#multi-select).
 - **Edit Entry rewrites a text entry in place and never adds one.** The id, pin and source app
   stay; saving then copies it as Copy to Clipboard does, marker included, so the poller does not
   record the edit a second time.
@@ -540,3 +544,32 @@ any other Tinycast paste.
 `pasteInPlace` writes the pasteboard at once and posts ⌘V 50ms later, and the target reads the
 pasteboard only when it handles that ⌘V. A press inside that gap would swap the pasteboard first:
 one entry pasted twice, another skipped. A queue would replay a held shortcut as a burst.
+
+## Multi-select
+
+⇧↑/⇧↓ extends from where the cursor was, ⇧-click selects the run to the clicked row, ⌘-click flips one
+row, and ⌘A selects every listed row. The cursor row stays `PaletteState.selection`; the marked rows
+are `ClipboardSelection` (`Model/`, Foundation-only), kept by id so a pin or a delete that moves rows
+does not shift a mark. A plain arrow, a plain click, a changed query or filter, leaving the screen and
+hiding the palette all clear it; Escape clears it before it does anything else, an open menu aside.
+
+**⌘A belongs to the search field while it holds text**, and while a menu is open. `ClipboardScreen`
+answers `.selectAll` only with an empty query and no menu, so the key otherwise falls through to the
+field editor's own select-all.
+
+**↵, ⌘↵, ⌃⌘↵ and ⌥↵ act on the merged text.** `ClipboardMerge.text` joins the marked rows in list order,
+one per line: a text entry as it is, a file as its path, an image as its blob's path, and an entry with
+nothing to write is skipped. `ClipboardDefaultAction.mergedAction(for:)` picks the action, and Paste as
+Plain Text folds into Paste, since the merged text is plain already. A paste goes through
+`Paster.pasteString`, marked so it is not recorded again; a copy goes through `Paster.copyPlainText`,
+unmarked, so the merged text enters history as the entry it now is. `ClipboardItem.plainText` is not
+involved, which is what keeps an image without plain text for Paste as Plain Text.
+
+**⌘. pins every unpinned entry, or unpins all once none is left unpinned**, through
+`ClipboardStore.setPinned`: pins stamp top-down and unpins rejoin bottom-up, so the order reads the same
+afterwards. **Deleting more than one asks first**, through `ClipboardCoordinator.deleteClips` and
+`DialogController`, then removes them in one `ClipboardStore.remove(_:)` pass.
+
+The single-entry chords — ⌘E, Copy Text, Show in Finder — are not offered on a batch, and the Actions
+menu shrinks to merged paste, merged copy, pin and delete. ⌘1…⌘0 clears the selection and activates
+that pin. A right-click inside the batch acts on the batch; anywhere else it starts over from that row.

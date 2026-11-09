@@ -14,6 +14,9 @@ struct ClipboardCoordinatorTests {
         await deletedEntryBecomesANewCopy()
         await tooLongEditIsRefused()
         await changedScreenKeepsItsSelection()
+        await batchDeleteWaitsForConfirmation()
+        batchPinPinsThenUnpins()
+        mergedChordsFollowTheDefaultAction()
         await cancelledAndEmptyEditsChangeNothing()
         print("\(passes) passed, \(failures) failed")
         if failures > 0 { exit(1) }
@@ -170,6 +173,52 @@ struct ClipboardCoordinatorTests {
             "a screen opened during editing keeps its own query and selection")
     }
 
+    static func batchDeleteWaitsForConfirmation() async {
+        let fixture = Fixture()
+        defer { fixture.cleanUp() }
+        let batch = Array(fixture.store.items.prefix(2))
+        fixture.palette.clipboardSelection.selectAll(in: batch.map(\.id))
+        fixture.core.confirmResult = false
+        await fixture.coordinator.deleteClips(batch)
+        expect(fixture.store.items.count == 3, "a refused confirmation deletes nothing")
+        expect(fixture.palette.clipboardSelection.isMultiple, "and keeps the selection")
+        fixture.core.confirmResult = true
+        await fixture.coordinator.deleteClips(batch)
+        expect(
+            fixture.store.items.count == 1
+                && !fixture.store.items.contains { item in batch.contains { $0.id == item.id } },
+            "a confirmed batch removes exactly the selected entries")
+        expect(fixture.palette.clipboardSelection == ClipboardSelection(), "and clears the selection")
+    }
+
+    static func batchPinPinsThenUnpins() {
+        let fixture = Fixture()
+        defer { fixture.cleanUp() }
+        let rows = fixture.store.search("", filter: .all)
+        let cursor = rows[0]
+        fixture.coordinator.togglePinnedClips(rows, cursor: cursor)
+        expect(
+            fixture.store.items.allSatisfy(\.isPinned),
+            "a mixed selection pins everything that was not pinned")
+        let pinned = fixture.store.search("", filter: .all)
+        fixture.coordinator.togglePinnedClips(pinned, cursor: pinned[0])
+        expect(
+            fixture.store.items.allSatisfy { !$0.isPinned },
+            "a fully pinned selection unpins all of it")
+    }
+
+    static func mergedChordsFollowTheDefaultAction() {
+        let fixture = Fixture()
+        defer { fixture.cleanUp() }
+        let rows = fixture.store.search("", filter: .all)
+        let expected = rows.compactMap(\.text).joined(separator: "\n")
+        fixture.coordinator.activate(merging: rows, chord: .command)
+        expect(Paster.plainCopies == [expected], "⌘↵ under a Paste default copies the merged text")
+        expect(Paster.pastedStrings.isEmpty, "and pastes nothing")
+        fixture.coordinator.activate(merging: rows)
+        expect(Paster.pastedStrings == [expected], "↵ under a Paste default pastes the merged text")
+    }
+
     static func expect(_ condition: Bool, _ message: String) {
         if condition {
             passes += 1
@@ -192,6 +241,7 @@ struct ClipboardCoordinatorTests {
         init(text: String = "draft selected", pinned: Bool = false) {
             Paster.copies = []
             Paster.plainCopies = []
+            Paster.pastedStrings = []
             store = ClipboardStore(directory: directory)
             store.addText("other pin", sourceBundleID: nil)
             store.togglePinned(store.items[0])
@@ -219,12 +269,15 @@ struct ClipboardCoordinatorTests {
 final class AppCore {
     var editedText: String? = "final selected"
     var onEdit: (() -> Void)?
+    var confirmResult = false
     var messages: [String] = []
     func editClipboardText(_ text: String) async -> String? { onEdit?(); return editedText }
     func showMessage(_ text: String, tone: DialogTone = .neutral) { messages.append(text) }
     func showProgress(_ text: String) {}
     func applyClipboardTextSearch() {}
-    func confirm(title: String, message: String, symbol: String, confirmTitle: String) async -> Bool { false }
+    func confirm(title: String, message: String, symbol: String, confirmTitle: String) async -> Bool {
+        confirmResult
+    }
 }
 
 enum DialogTone { case neutral, danger }
@@ -253,6 +306,7 @@ final class ClipboardManager {
 final class PaletteWindowController {
     var previousApp: NSRunningApplication? { nil }
     func pasteKeepingWindowOpen(_ item: ClipboardItem, store: ClipboardStore) -> Bool { true }
+    func pasteStringKeepingWindowOpen(_ text: String) {}
 }
 
 @MainActor
@@ -275,6 +329,7 @@ enum ClipboardTextWorker {
 enum Paster {
     static var copies: [ClipboardItem] = []
     static var plainCopies: [String] = []
+    static var pastedStrings: [String] = []
     @discardableResult
     static func copy(_ item: ClipboardItem, store: ClipboardStore) -> Bool {
         copies.append(item)
@@ -283,6 +338,9 @@ enum Paster {
     }
     @discardableResult
     static func copyPlainText(_ text: String) -> Bool { plainCopies.append(text); return true }
+    static func pasteString(_ text: String, previousApp: NSRunningApplication?) {
+        pastedStrings.append(text)
+    }
     static func paste(
         _ item: ClipboardItem, store: ClipboardStore, previousApp: NSRunningApplication?
     ) -> Bool { true }

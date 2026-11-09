@@ -87,6 +87,33 @@ final class ClipboardCoordinator {
         }
     }
 
+    /// The selection as one text, handed over the way `chord` hands over a single entry.
+    func activate(merging items: [ClipboardItem], chord: ClipboardChord = .return) {
+        let text = ClipboardMerge.text(of: items)
+        guard !text.isEmpty else { return reportNothingToMerge() }
+        switch settings.clipboardDefaultAction.mergedAction(for: chord) {
+        case .copy:
+            paletteCoordinator.hidePalette(restoreFocus: false)
+            // Unmarked, so the merged text enters history like any other copy the reader meant to make.
+            Paster.copyPlainText(text)
+            core.showMessage(String(localized: "Copied \(items.count) entries"))
+        default:
+            let previous = windowController.previousApp
+            paletteCoordinator.hidePalette(restoreFocus: false)
+            Paster.pasteString(text, previousApp: previous)
+        }
+    }
+
+    func pasteKeepingWindowOpen(merging items: [ClipboardItem]) {
+        let text = ClipboardMerge.text(of: items)
+        guard !text.isEmpty else { return reportNothingToMerge() }
+        windowController.pasteStringKeepingWindowOpen(text)
+    }
+
+    private func reportNothingToMerge() {
+        core.showMessage(String(localized: "Nothing to paste"), tone: .neutral)
+    }
+
     func paste(_ item: ClipboardItem) {
         let previous = windowController.previousApp
         paletteCoordinator.hidePalette(restoreFocus: false)
@@ -287,6 +314,30 @@ final class ClipboardCoordinator {
         clipboardStore.togglePinned(item)
         selectClip(item)
         palette.followToken = UUID()
+    }
+
+    /// Pins the unpinned ones, or unpins all when every one is already pinned.
+    func togglePinnedClips(_ items: [ClipboardItem], cursor: ClipboardItem) {
+        clipboardStore.setPinned(items.contains { !$0.isPinned }, items)
+        selectClip(cursor)
+        palette.followToken = UUID()
+    }
+
+    /// Confirmed first, as Delete All is: a selection is many entries gone with one key.
+    func deleteClips(_ items: [ClipboardItem]) async {
+        guard !items.isEmpty else { return }
+        if items.count > 1 {
+            let count = items.count
+            guard
+                await core.confirm(
+                    title: String(localized: "Delete \(count) Entries"),
+                    message: String(
+                        localized: "Are you sure you want to delete the \(count) selected clipboard entries?"),
+                    symbol: PaletteMode.clipboard.systemImage, confirmTitle: String(localized: "Delete"))
+            else { return }
+        }
+        clipboardStore.remove(items)
+        palette.clipboardSelection.clear()
     }
 
     /// Select `item`'s row as currently filtered; a moved row isn't always index 0.

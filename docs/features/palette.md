@@ -82,6 +82,11 @@ A chord aimed at the selected row — ⌃X, ⇧⌘F, ⌘Y and the rest — follo
 `PaletteShortcut` recognises the key and carries its compact-bar and open-menu guards, and the screen
 answers through `perform(_:at:)`, so a new chord never adds a cast to the shell.
 
+⇧↑/⇧↓ grows a batch selection the same way: `RootPaletteView` asks the screen through
+`extendSelection(_:from:)` and takes the selection it returns, so a screen with no such selection
+answers nil and the key does nothing. Only the clipboard has one
+([clipboard.md](clipboard.md#multi-select)).
+
 Where a reset leaves the highlight is the screen's to say too. Every reset — an open, a new query, a
 new filter — goes through `RootPaletteView.land()`, which reads `landingSelection`, so handlers that
 fire in one update agree whatever order they run in. `onAppear` lands as well: the first show builds

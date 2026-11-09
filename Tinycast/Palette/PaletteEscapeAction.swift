@@ -4,6 +4,7 @@ import Foundation
 enum PaletteEscapeAction: Equatable {
     case clearMenuQuery
     case closeMenu
+    case clearSelection
     case leaveArgumentField
     case clearQuery
     case exitExtensionScreen
@@ -13,9 +14,12 @@ enum PaletteEscapeAction: Equatable {
 
     static func resolve(
         menuOpen: Bool, menuQuery: String, argumentFocused: Bool, query: String, mode: PaletteMode,
-        canGoBack: Bool, behavior: EscapeKeyBehavior, compactRootExpanded: Bool = false
+        canGoBack: Bool, behavior: EscapeKeyBehavior, compactRootExpanded: Bool = false,
+        selectionActive: Bool = false
     ) -> Self {
         if menuOpen { return menu(query: menuQuery) }
+        // A batch selection is work the user built, so it is dropped before anything else is left.
+        if selectionActive { return .clearSelection }
         // An argument field is a step deeper than the query, so it is left before anything clears.
         if argumentFocused { return .leaveArgumentField }
         if !query.isEmpty { return .clearQuery }

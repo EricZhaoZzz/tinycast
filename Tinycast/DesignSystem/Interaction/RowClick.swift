@@ -24,14 +24,30 @@ extension View {
         select: @escaping () -> Void, activate: @escaping () -> Void, drag: RowDrag? = nil
     ) -> some View {
         overlay(
-            RowPressCatcher(activation: .doubleClick, select: select, activate: activate, drag: drag))
+            RowPressCatcher(
+                activation: .doubleClick, select: { _ in select() }, extendsSelection: false,
+                activate: activate, drag: drag))
+    }
+
+    /// A ⇧ or ⌘ press only marks the row: it never activates or drags, so it can build a selection.
+    func onRowClick(
+        selectWith select: @escaping (NSEvent.ModifierFlags) -> Void,
+        activate: @escaping () -> Void, drag: RowDrag? = nil
+    ) -> some View {
+        overlay(
+            RowPressCatcher(
+                activation: .doubleClick, select: select, extendsSelection: true,
+                activate: activate, drag: drag))
     }
 
     /// A tap that can drag out: activation waits for the release, so a drag never activates.
     @ViewBuilder
     func onRowTap(drag: RowDrag?, perform activate: @escaping () -> Void) -> some View {
         if let drag {
-            overlay(RowPressCatcher(activation: .release, select: {}, activate: activate, drag: drag))
+            overlay(
+                RowPressCatcher(
+                    activation: .release, select: { _ in }, extendsSelection: false,
+                    activate: activate, drag: drag))
         } else {
             onTapGesture(perform: activate)
         }
@@ -41,7 +57,8 @@ extension View {
 /// AppKit, not `onDrag`: only an `NSDraggingSource` can force `.copy` over a same-volume move.
 private struct RowPressCatcher: NSViewRepresentable {
     let activation: RowPressView.Activation
-    let select: () -> Void
+    let select: (NSEvent.ModifierFlags) -> Void
+    let extendsSelection: Bool
     let activate: () -> Void
     let drag: RowDrag?
 
@@ -50,6 +67,7 @@ private struct RowPressCatcher: NSViewRepresentable {
     func updateNSView(_ view: RowPressView, context: Context) {
         view.activation = activation
         view.select = select
+        view.extendsSelection = extendsSelection
         view.activate = activate
         view.drag = drag
     }
@@ -67,7 +85,8 @@ private final class RowPressView: NSView, NSDraggingSource {
     private static let dragSlop: CGFloat = 4
 
     var activation = Activation.doubleClick
-    var select: () -> Void = {}
+    var select: (NSEvent.ModifierFlags) -> Void = { _ in }
+    var extendsSelection = false
     var activate: () -> Void = {}
     var drag: RowDrag?
 
@@ -82,7 +101,9 @@ private final class RowPressView: NSView, NSDraggingSource {
     }
 
     override func mouseDown(with event: NSEvent) {
-        select()
+        let modifiers = event.modifierFlags.intersection([.shift, .command])
+        select(modifiers)
+        if extendsSelection, !modifiers.isEmpty { return }
         if activation == .doubleClick {
             guard event.clickCount < 2 else {
                 activate()

@@ -10,17 +10,33 @@ struct PaletteFrame: Equatable {
 @MainActor
 @Observable
 final class PaletteState {
-    var mode: PaletteMode = .launcher { didSet { restoredSelection = nil } }
+    var mode: PaletteMode = .launcher {
+        didSet {
+            restoredSelection = nil
+            clipboardSelection.clear()
+        }
+    }
     /// The screens below `mode`, innermost last: a summon starts a new one, navigating pushes on.
     private(set) var backStack: [PaletteFrame] = []
-    var query: String = "" { didSet { restoredSelection = nil } }
+    var query: String = "" {
+        didSet {
+            restoredSelection = nil
+            clipboardSelection.clear()
+        }
+    }
     @ObservationIgnored private(set) var restoredSelection: Int?
     var selection: Int = 0
     /// True while an IME holds marked text, which leaves `query` empty. The panel publishes it.
     var isComposing = false
     var clipboardFilter: ClipboardFilter = .all {
-        didSet { if oldValue != clipboardFilter { restoredSelection = nil } }
+        didSet {
+            guard oldValue != clipboardFilter else { return }
+            restoredSelection = nil
+            clipboardSelection.clear()
+        }
     }
+    /// The entries a batch action covers; `selection` stays the cursor row among them.
+    var clipboardSelection = ClipboardSelection()
     var fileSearchFilter: FileSearchFilter = .all
     var emojiCategoryFilter: EmojiCategoryFilter = .all
     /// Nil means the configured default; zoom only overrides it for this picker session.
@@ -80,6 +96,7 @@ final class PaletteState {
 
     func noteVisible(_ visible: Bool) {
         isVisible = visible
+        if !visible { clipboardSelection.clear() }
     }
 
     var canGoBack: Bool { !backStack.isEmpty }

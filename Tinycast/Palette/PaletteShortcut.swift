@@ -56,6 +56,8 @@ enum PaletteShortcut: Equatable {
     case pin
     /// ⌘1…⌘0, matched by key code in the panel and handed over as a slot.
     case favoriteSlot(Int)
+    /// ⌘A, which a screen without a batch selection leaves to the search field.
+    case selectAll
 
     /// `matches` compares through the active layout, so the letters stay positional.
     static func resolve(
@@ -85,6 +87,7 @@ enum PaletteShortcut: Equatable {
         if command, !shift, matches("d") { return .duplicate }
         if command, option, matches(",") { return .settings }
         if command, matches("j") { return .continueInChat }
+        if command, !shift, !option, !control, matches("a") { return .selectAll }
         return nil
     }
 
@@ -93,7 +96,7 @@ enum PaletteShortcut: Equatable {
         switch self {
         case .copyFile, .copyName, .copyPath, .copyText, .pasteFile, .quickLook, .openInApp,
             .showDetails, .toggleFavorite, .hideFromSearch, .quit, .forceQuit, .minimizeWindow,
-            .hideApp, .restart, .edit, .duplicate, .showInFinder:
+            .hideApp, .restart, .edit, .duplicate, .showInFinder, .selectAll:
             true
         case .commandDelete, .delete, .deleteAll, .pin, .favoriteSlot, .continueInChat, .newItem,
             .settings, .copyCalculation:
@@ -108,7 +111,7 @@ enum PaletteShortcut: Equatable {
             .newItem, .settings, .edit, .duplicate, .showInFinder:
             true
         case .commandDelete, .pasteFile, .quit, .forceQuit, .hideApp, .restart, .pin, .favoriteSlot,
-            .continueInChat:
+            .continueInChat, .selectAll:
             false
         }
     }

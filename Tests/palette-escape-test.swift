@@ -30,16 +30,25 @@ struct PaletteEscapeTests {
     static func resolve(
         menuOpen: Bool = false, menuQuery: String = "", argumentFocused: Bool = false,
         query: String = "", mode: PaletteMode = .launcher, canGoBack: Bool = false,
-        behavior: EscapeKeyBehavior = .navigateBackOrClose, compactRootExpanded: Bool = false
+        behavior: EscapeKeyBehavior = .navigateBackOrClose, compactRootExpanded: Bool = false,
+        selectionActive: Bool = false
     ) -> PaletteEscapeAction {
         PaletteEscapeAction.resolve(
             menuOpen: menuOpen, menuQuery: menuQuery, argumentFocused: argumentFocused,
             query: query, mode: mode, canGoBack: canGoBack, behavior: behavior,
-            compactRootExpanded: compactRootExpanded)
+            compactRootExpanded: compactRootExpanded, selectionActive: selectionActive)
     }
 
     static func main() {
         for behavior in EscapeKeyBehavior.allCases {
+            expect(
+                resolve(
+                    query: "draft", mode: .clipboard, canGoBack: true, behavior: behavior,
+                    selectionActive: true),
+                .clearSelection, "a batch selection is dropped before the query or the screen")
+            expect(
+                resolve(menuOpen: true, behavior: behavior, selectionActive: true),
+                .closeMenu, "an open menu still outranks a batch selection")
             expect(
                 resolve(query: "notes", behavior: behavior, compactRootExpanded: true),
                 .clearQuery, "compact root clears text before collapsing under either preference")
