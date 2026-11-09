@@ -6,9 +6,11 @@ struct ClipboardList: View {
     @Environment(\.metrics) private var metrics
     let results: [ClipboardItem]
     let selectedID: ClipboardItem.ID?
+    /// The batch selection, marked beside the cursor row; empty unless two or more are chosen.
+    let markedIDs: Set<ClipboardItem.ID>
     /// Changes only when the list should scroll, so mouse selection never yanks it.
     let scroll: ScrollIntent
-    let onSelect: (ClipboardItem) -> Void
+    let onSelect: (ClipboardItem, NSEvent.ModifierFlags) -> Void
     let onActivate: () -> Void
     let onActions: (ClipboardItem) -> Void
     /// Nil when the entry has nothing left to hand over, which is reported rather than dragged.
@@ -62,6 +64,7 @@ struct ClipboardList: View {
                         case .item(let item, let slot):
                             ClipboardRow(
                                 item: item, selected: item.id == selectedID,
+                                marked: markedIDs.contains(item.id),
                                 imageURL: store.imageURL(for: item),
                                 ownsImage: store.ownsImage(of: item), slot: slot
                             )
@@ -70,9 +73,9 @@ struct ClipboardList: View {
                             // The light catcher: `.contextMenu` stalls.
                             .onRightClick { onActions(item) }
                             .onRowClick(
-                                select: { onSelect(item) },
+                                selectWith: { onSelect(item, $0) },
                                 activate: {
-                                    onSelect(item)
+                                    onSelect(item, [])
                                     onActivate()
                                 },
                                 drag: RowDrag(
@@ -124,11 +127,28 @@ enum DateBucket: Int {
     }
 }
 
+private extension ClipboardItem {
+    /// The one-line stand-in a list shows for an entry.
+    var rowTitle: String {
+        switch kind {
+        // Cap before trimming: never walk a multi-MB clipboard string per row.
+        case .text:
+            return String((text ?? "").prefix(200)).trimmingCharacters(in: .whitespacesAndNewlines)
+        case .image: return String(localized: "Image")
+        case .file:
+            return filePath.map {
+                URL(filePath: $0, directoryHint: .inferFromPath).lastPathComponent
+            } ?? String(localized: "File")
+        }
+    }
+}
+
 private struct ClipboardRow: View {
 
     @Environment(\.metrics) private var metrics
     let item: ClipboardItem
     let selected: Bool
+    let marked: Bool
     let imageURL: URL?
     let ownsImage: Bool
     /// This row's ⌘-digit, or nil when it is not among the first ten visible pins.
@@ -138,7 +158,7 @@ private struct ClipboardRow: View {
 
     /// Selection wins over hover when a row is both; otherwise hover shows its fainter layer.
     private var fill: Color {
-        if selected { return Theme.Colors.selection }
+        if selected || marked { return Theme.Colors.selection }
         if hovered { return Theme.Colors.rowHover }
         return .clear
     }
@@ -169,19 +189,7 @@ private struct ClipboardRow: View {
         .armedHover($hovered)
     }
 
-    private var previewText: String {
-        switch item.kind {
-        // Cap before trimming: never walk a multi-MB clipboard string per row.
-        case .text:
-            return String((item.text ?? "").prefix(200)).trimmingCharacters(
-                in: .whitespacesAndNewlines)
-        case .image: return String(localized: "Image")
-        case .file:
-            return item.filePath.map {
-                URL(filePath: $0, directoryHint: .inferFromPath).lastPathComponent
-            } ?? String(localized: "File")
-        }
-    }
+    private var previewText: String { item.rowTitle }
 
     @ViewBuilder
     private func thumbnail(_ color: ColorValue?) -> some View {
@@ -292,10 +300,15 @@ struct ClipboardPreview: View {
 
     @Environment(\.metrics) private var metrics
     let item: ClipboardItem?
+    /// Two or more batch-selected entries, which replace the single preview.
+    let marked: [ClipboardItem]
     @Environment(ClipboardStore.self) private var store
 
     var body: some View {
-        if let item {
+        if marked.count >= 2 {
+            ClipboardSelectionSummary(items: marked)
+                .padding(.horizontal, 12)
+        } else if let item {
             VStack(alignment: .leading, spacing: 0) {
                 content(for: item)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -343,6 +356,57 @@ struct ClipboardPreview: View {
         case .file:
             if let path = item.filePath { FilePreviewStage(path: path) }
         }
+    }
+}
+
+/// What a batch action will cover: how many, of which kinds, and the first few by name.
+private struct ClipboardSelectionSummary: View {
+    @Environment(\.metrics) private var metrics
+    let items: [ClipboardItem]
+
+    private static let previewCount = 6
+
+    private var kindCounts: [(label: String, count: Int)] {
+        [
+            (String(localized: "Text"), items.count { $0.kind == .text }),
+            (String(localized: "Image"), items.count { $0.kind == .image }),
+            (String(localized: "File"), items.count { $0.kind == .file })
+        ].filter { $0.count > 0 }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: metrics.spacing.sm) {
+            Text("\(items.count) entries selected")
+                .font(metrics.typography.sectionHeader)
+                .foregroundStyle(.secondary)
+            VStack(spacing: 0) {
+                ForEach(kindCounts, id: \.label) { kind in
+                    HStack {
+                        Text(kind.label).foregroundStyle(.secondary)
+                        Spacer(minLength: metrics.spacing.lg)
+                        Text(kind.count.formatted())
+                    }
+                    .font(.callout)
+                    .padding(.vertical, metrics.spacing.sm)
+                    Divider()
+                }
+            }
+            ForEach(items.prefix(Self.previewCount)) { item in
+                Text(item.rowTitle)
+                    .font(.callout)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if items.count > Self.previewCount {
+                Text("+ \(items.count - Self.previewCount) more")
+                    .font(.callout)
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.top, metrics.spacing.xl)
     }
 }
 

@@ -129,7 +129,18 @@ enum ClipboardDefaultAction: String, CaseIterable, Identifiable, Sendable {
 
     /// What `chord` runs on `item` with this as the default; nil when it has no text to paste.
     func action(for chord: ClipboardChord, on item: ClipboardItem) -> Self? {
-        let hasPlainText = item.plainText != nil
+        action(for: chord, hasPlainText: item.plainText != nil)
+    }
+
+    /// A merged selection is text throughout, so no chord is withheld and plain text is plain paste.
+    func mergedAction(for chord: ClipboardChord) -> Self {
+        switch action(for: chord, hasPlainText: true) {
+        case .copy: .copy
+        default: .paste
+        }
+    }
+
+    private func action(for chord: ClipboardChord, hasPlainText: Bool) -> Self? {
         // An image has no text, so a plain-text default pastes it as it is.
         let resolved: Self = self == .pastePlainText && !hasPlainText ? .paste : self
         let action: Self =
@@ -418,6 +429,15 @@ final class ClipboardStore {
         if item.isPinned { unpin(item) } else { pin(item) }
     }
 
+    /// `batch` in display order: pins stamp top-down and unpins rejoin bottom-up, so it reads the same.
+    func setPinned(_ pinned: Bool, _ batch: [ClipboardItem]) {
+        if pinned {
+            for item in batch where !item.isPinned { pin(item) }
+        } else {
+            for item in batch.reversed() where item.isPinned { unpin(item) }
+        }
+    }
+
     func updateText(_ text: String, of item: ClipboardItem) throws(UpdateError) -> ClipboardItem? {
         guard item.kind == .text else { return nil }
         guard text.count <= Self.maxTextLength else { throw .tooLong }
@@ -445,15 +465,23 @@ final class ClipboardStore {
     }
 
     func remove(_ item: ClipboardItem) {
-        textSearchMatches.removeAll { $0.id == item.id }
+        remove([item])
+    }
+
+    /// One pass over the window for the whole batch, so a long selection publishes once.
+    func remove(_ batch: [ClipboardItem]) {
+        let ids = Set(batch.map(\.id))
+        textSearchMatches.removeAll { ids.contains($0.id) }
         if let stmt = deleteByIDStmt {
-            sqlite3_bind_text(stmt, 1, item.id.uuidString, -1, SQLITE_TRANSIENT)
-            sqlite3_step(stmt)
-            sqlite3_reset(stmt)
-            sqlite3_clear_bindings(stmt)
+            for item in batch {
+                sqlite3_bind_text(stmt, 1, item.id.uuidString, -1, SQLITE_TRANSIENT)
+                sqlite3_step(stmt)
+                sqlite3_reset(stmt)
+                sqlite3_clear_bindings(stmt)
+            }
         }
-        items.removeAll { $0.id == item.id }
-        deleteBlob(item)
+        items.removeAll { ids.contains($0.id) }
+        for item in batch { deleteBlob(item) }
     }
 
     /// A pin is a deliberate keep, so it outlives the bulk clear; `remove` is the way to drop one.

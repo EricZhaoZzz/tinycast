@@ -549,7 +549,7 @@ struct RootPaletteView: View {
                     core.paletteCoordinator.expandFromCompact()
                     return .handled
                 }
-                return moveVertically(1)
+                return moveVertically(1, extending: press.modifiers == .shift)
             }
             .onKeyPress(keys: [.upArrow], phases: [.down, .repeat]) { press in
                 if let reorder = movePinnedOrFavorite(-1, modifiers: press.modifiers) { return reorder }
@@ -560,7 +560,7 @@ struct RootPaletteView: View {
                     return .handled
                 }
                 if vm.isComposing { return .ignored }
-                return moveVertically(-1)
+                return moveVertically(-1, extending: press.modifiers == .shift)
             }
             .onKeyPress(keys: [.leftArrow], phases: [.down, .repeat]) { press in
                 if vm.isControlListOpen { return .ignored }
@@ -621,10 +621,13 @@ struct RootPaletteView: View {
                     argumentFocused: argumentFocused != nil, query: vm.query, mode: vm.mode,
                     canGoBack: vm.canGoBack,
                     behavior: settings.escapeKeyBehavior,
-                    compactRootExpanded: settings.compactMode && vm.mode == .launcher && !isCollapsed)
+                    compactRootExpanded: settings.compactMode && vm.mode == .launcher && !isCollapsed,
+                    selectionActive: vm.mode == .clipboard && vm.clipboardSelection.isMultiple)
                 {
                 case .clearMenuQuery, .closeMenu:
                     escapeMenu()
+                case .clearSelection:
+                    vm.clipboardSelection.clear()
                 case .leaveArgumentField:
                     returnFocusToSearchField()
                 case .clearQuery:
@@ -1394,12 +1397,20 @@ struct RootPaletteView: View {
         scroll = ScrollIntent(kind: .follow)
     }
 
-    private func moveVertically(_ delta: Int) -> KeyPress.Result {
+    private func moveVertically(_ delta: Int, extending: Bool = false) -> KeyPress.Result {
         let screen = screen
         // A control editing with ↑/↓ keeps them; only ⇥ leaves it.
         guard !screen.ownsVerticalKeys(at: selection(in: screen)) else { return .ignored }
         // Moving off a command takes its argument fields with it, so hand focus back first.
         if argumentFocused != nil { returnFocusToSearchField() }
+        if extending {
+            guard let next = screen.extendSelection(delta, from: selection(in: screen)) else {
+                return .ignored
+            }
+            vm.selection = next
+            scroll = ScrollIntent(kind: .follow)
+            return .handled
+        }
         guard let next = screen.move(delta, axis: .vertical, from: selection(in: screen)) else {
             move(delta, in: screen)
             return .handled
